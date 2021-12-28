@@ -1,1 +1,3 @@
-
+To update "version.bin", use rehacker to update and export
+"version"-ressource into "version.bin" and Resourcer.exe
+to change the resources by commandline.
