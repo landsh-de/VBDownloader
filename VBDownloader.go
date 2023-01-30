@@ -1,6 +1,6 @@
-package main
+﻿package main
 
-	// VBDownloader V1.1 by Veit Berwig (20210927)
+	// VBDownloader V1.2 by Veit Berwig (20230111)
 	//
 	// Simple tool to download files or web-pages with proxy-support.
 	//
@@ -16,15 +16,12 @@ package main
 	// ToDo:
 	//
 	//     - Check for exclusive execution under admin-account
-	//       by hidden execution of "openfiles.exe" >nul 2>&1"
-	//       in a cmd-pipe from "os/exec" with "Cmd.Run":
-	//       "https://pkg.go.dev/os/exec#Cmd.Run"
-	//
-	// This is much easier, than using direct calls to Windows API.
+	//       by changing Manifest to "admin".
 	//
 	// =============================================================
 	//
 	// Changelog:
+	//
 	//
 	//     20210924:
 	//
@@ -36,6 +33,7 @@ package main
 	//
 	//     - minor changes.
 	//
+	//
 	//     20210927:
 	//
 	//     - Added certificate serial-number output in logging.
@@ -43,32 +41,29 @@ package main
 	//     - Added "-proxy" option to force manual-proxy config
 	//       for http(s).
 	//
+	//
+	//     20230111:
+	//
+	//     - Did some code-cleanup and rebuild with Go 1.19.5.
+	//
+	//     - Tried to find out, why SSLLABS reports an SSLv2 usage,
+	//       when doing a client-test under:
+	//       https://www.ssllabs.com/ssltest/viewMyClient.html ...
+	//       Maybe the test by SSLLABS is incomplete, because the
+	//       Go-developers had already disabled SSLv2 and SSLv3 !
+	//
+	//     - No download will be performed, when no parameters
+	//       are provided.
+	//
 	// =============================================================
 	// A list of cipher suite IDs that are, or have been,
 	// implemented by "crypto/tls/cipher_suites.go" package.
 	// =============================================================
 	// See
 	// https://www.iana.org/assignments/tls-parameters/tls-parameters.xml
-	// const (
 	// =============================================================
-	// TLS 1.0 - 1.2 cipher suites.
+	// TLS 1.2 cipher suites.
 	// =============================================================
-	// TLS_RSA_WITH_RC4_128_SHA                      uint16 = 0x0005
-	// TLS_RSA_WITH_3DES_EDE_CBC_SHA                 uint16 = 0x000a
-	// TLS_RSA_WITH_AES_128_CBC_SHA                  uint16 = 0x002f
-	// TLS_RSA_WITH_AES_256_CBC_SHA                  uint16 = 0x0035
-	// TLS_RSA_WITH_AES_128_CBC_SHA256               uint16 = 0x003c
-	// TLS_RSA_WITH_AES_128_GCM_SHA256               uint16 = 0x009c
-	// TLS_RSA_WITH_AES_256_GCM_SHA384               uint16 = 0x009d
-	// TLS_ECDHE_ECDSA_WITH_RC4_128_SHA              uint16 = 0xc007
-	// TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA          uint16 = 0xc009
-	// TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA          uint16 = 0xc00a
-	// TLS_ECDHE_RSA_WITH_RC4_128_SHA                uint16 = 0xc011
-	// TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA           uint16 = 0xc012
-	// TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA            uint16 = 0xc013
-	// TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA            uint16 = 0xc014
-	// TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256       uint16 = 0xc023
-	// TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256         uint16 = 0xc027
 	// TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256         uint16 = 0xc02f
 	// TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256       uint16 = 0xc02b
 	// TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384         uint16 = 0xc030
@@ -78,12 +73,11 @@ package main
 	// =============================================================
 	// TLS 1.3 cipher suites.
 	// =============================================================
-	// TLS_AES_128_GCM_SHA256       uint16 = 0x1301
-	// TLS_AES_256_GCM_SHA384       uint16 = 0x1302
-	// TLS_CHACHA20_POLY1305_SHA256 uint16 = 0x1303
+	// TLS_AES_128_GCM_SHA256                        uint16 = 0x1301
+	// TLS_AES_256_GCM_SHA384                        uint16 = 0x1302
+	// TLS_CHACHA20_POLY1305_SHA256                  uint16 = 0x1303
 	// =============================================================
 	// TLS_FALLBACK_SCSV isn't a standard cipher suite but an indicator
-	// =============================================================
 	// that the client is doing version fallback. See RFC 7507.
 	// TLS_FALLBACK_SCSV uint16 = 0x5600
 	//
@@ -184,39 +178,39 @@ func Download(tofile, url string) error {
 
     // ==============================================================
     // Configure TLS
+    // https://pkg.go.dev/crypto/tls#Config
     // ==============================================================
     conf := &tls.Config{
+					// https://cs.opensource.google/go/go/+/refs/tags/go1.19.5:src/crypto/tls/common.go
 					InsecureSkipVerify: false,
 					// RootCAs: ServerCertPool(),
 					MinVersion: tls.VersionTLS12,
-					// https://cs.opensource.google/go/go/+/refs/tags/go1.17.1:src/crypto/tls/common.go
+                    MaxVersion: tls.VersionTLS13,
 					CurvePreferences: []tls.CurveID{tls.X25519, tls.CurveP521, tls.CurveP384, tls.CurveP256},
-					PreferServerCipherSuites: true,
-					// https://cs.opensource.google/go/go/+/refs/tags/go1.17.1:src/crypto/tls/cipher_suites.go
-					// the list is ignored. Note that TLS 1.3 ciphersuites are not configurable.
-					// CipherSuites is a list of enabled TLS 1.0–1.2 cipher suites. The order of
+                    // PreferServerCipherSuites is a legacy field and has no effect.
+                    // It used to control whether the server would follow the client's or the
+                    // cipher suite based on logic that takes into account inferred client
+                    // hardware, server hardware, and security.
+                    // Deprecated: PreferServerCipherSuites is ignored.
+					PreferServerCipherSuites: false,
+                    //
+                    // ### CipherSuites ###
+                    // CipherSuites is a list of enabled TLS 1.0–1.2 cipher suites. The order of
+                    // the list is ignored. Note that TLS 1.3 ciphersuites are not configurable.
+                    // https://cs.opensource.google/go/go/+/refs/tags/go1.19.5:src/crypto/tls/cipher_suites.go
 					// https://pkg.go.dev/crypto/tls#Config
 					CipherSuites: []uint16{
-					tls.TLS_CHACHA20_POLY1305_SHA256,
-					tls.TLS_AES_256_GCM_SHA384,
-					tls.TLS_AES_128_GCM_SHA256,
-					tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
-					tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
-					tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
-					tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
-					tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-					tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-					tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-					tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-					// tls.TLS_RSA_WITH_AES_256_GCM_SHA384,            // Weak Cyphers !!
-					// tls.TLS_RSA_WITH_AES_128_GCM_SHA256,            // Weak Cyphers !!
-					// tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256,    // Weak Cyphers !!
-					// tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,      // Weak Cyphers !!
-					// tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,         // Weak Cyphers !!
-					// tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,         // Weak Cyphers !!
-					// tls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,       // Weak Cyphers !!
-					// tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,       // Weak Cyphers !!
-					// tls.TLS_RSA_WITH_AES_256_CBC_SHA,               // Weak Cyphers !!
+					tls.TLS_CHACHA20_POLY1305_SHA256,                   // TLS 1.3 cipher suites.
+					tls.TLS_AES_256_GCM_SHA384,                         // TLS 1.3 cipher suites.
+					tls.TLS_AES_128_GCM_SHA256,                         // TLS 1.3 cipher suites.
+					tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,  // TLS 1.2 cipher suites.
+					tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,    // TLS 1.2 cipher suites.
+					tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,  // TLS 1.2 cipher suites.
+					tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,    // TLS 1.2 cipher suites.
+					tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,        // TLS 1.2 cipher suites.
+					tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,          // TLS 1.2 cipher suites.
+					tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,        // TLS 1.2 cipher suites.
+					tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,          // TLS 1.2 cipher suites.
 					},
 	}
 
@@ -290,8 +284,10 @@ func main() {
 
 	Myhelp   := flag.Bool("help", false, "Optional, prints usage info.")
 	Myver    := flag.Bool("version", false, "Optional, prints version info.")
-	Myurl    := flag.String("url", "https://hg.mozilla.org/mozilla-central/raw-file/tip/security/nss/lib/ckfw/builtins/certdata.txt", "The url for the download.")
-	Mytofile := flag.String("tofile", "certdata.txt", "The local name for the download.")
+	// Myurl    := flag.String("url", "https://hg.mozilla.org/mozilla-central/raw-file/tip/security/nss/lib/ckfw/builtins/certdata.txt", "The url for the download.")
+	// Mytofile := flag.String("tofile", "certdata.txt", "The local name for the download.")
+	Myurl    := flag.String("url", "", "The url for the download.")
+	Mytofile := flag.String("tofile", "", "The local name for the download.")
 	Myproxy  := flag.String("proxy", "", "The proxy-server to use for the download.")
 	Mywd     := flag.String("wd", "", "Set current working-directory (for file-operations).")
 
@@ -311,12 +307,13 @@ Options:
 `
 	version  := `Version:
 
-VBDownLoader version 1.1 copyright by veit berwig (2021 ZIT-SH)
-VBDownLoader is using hardened Cypher-Suites for TLS !!
+VBDownLoader version 1.2 by veit berwig (2023 ZIT-SH)
+VBDownLoader is using hardened Cypher-Suites for TLS.
 Check it out: use url ...
-  1) https://clienttest.ssllabs.com/ssltest/viewMyClient.html
-  2) https://www.howsmyssl.com
-and download to "MyClient.html" and open file into Browser.
+1) https://clienttest.ssllabs.com/ssltest/viewMyClient.html
+   and download to "MyClient.html" and open file in Browser, or
+2) https://www.howsmyssl.com/a/check
+   and download to "HowsMySSL.json" and open file in Browser.
 
 Proxy is supported by using the environment or commandline:
 HTTP_PROXY, HTTPS_PROXY and NO_PROXY (or lowercase versions).
@@ -330,7 +327,7 @@ Options:
   -proxy    Optional, The proxy-server to use for the download.
   -wd       Optional, Set current working-directory (for file-operations).
 `
-    Myversion := `VBDownLoader version 1.1 copyright by veit berwig (2021 ZIT-SH)`
+    Myversion := `VBDownLoader version 1.2 by veit berwig (2023 ZIT-SH)`
 
     fmt.Println("=====================================================================")
     fmt.Println(Myversion)
